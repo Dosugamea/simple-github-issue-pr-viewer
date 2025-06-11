@@ -12,7 +12,7 @@ interface ApiKeyContextType {
 
 const ApiKeyContext = createContext<ApiKeyContextType | undefined>(undefined)
 
-const STORAGE_KEY = "github-api-key-encrypted"
+const STORAGE_KEY = "star"
 
 export function ApiKeyProvider({ children }: { children: ReactNode }) {
   const [apiKey, setApiKeyState] = useState<string | null>(null)
