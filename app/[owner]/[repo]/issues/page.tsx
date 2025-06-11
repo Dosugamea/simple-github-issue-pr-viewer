@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -165,6 +167,39 @@ export default function IssuesPage() {
     // 検索実行は次のuseEffectで行われる
   }
 
+  // Enterキーでの検索実行
+  const handleKeywordEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      setAppliedSearch(searchInput)
+      setAppliedAuthor(authorInput)
+      setAppliedLabels([...selectedLabels])
+      setAppliedSortBy(sortBy)
+      setAppliedSortDirection(sortDirection)
+
+      toast({
+        title: "検索実行",
+        description: "Enterキーで検索を実行しました",
+      })
+    }
+  }
+
+  const handleAuthorEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      setAppliedSearch(searchInput)
+      setAppliedAuthor(authorInput)
+      setAppliedLabels([...selectedLabels])
+      setAppliedSortBy(sortBy)
+      setAppliedSortDirection(sortDirection)
+
+      toast({
+        title: "検索実行",
+        description: "作成者フィルターで検索を実行しました",
+      })
+    }
+  }
+
   // 適用済み条件が変更されたときに検索実行
   useEffect(() => {
     if (apiKey && owner && repo) {
@@ -282,9 +317,10 @@ export default function IssuesPage() {
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="issue-search"
-                      placeholder="タイトル、説明で検索..."
+                      placeholder="タイトル、説明で検索... (Enterで実行)"
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
+                      onKeyDown={handleKeywordEnter}
                       className="pl-10"
                     />
                   </div>
@@ -298,9 +334,10 @@ export default function IssuesPage() {
                     <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="author-search"
-                      placeholder="ユーザー名を入力..."
+                      placeholder="ユーザー名を入力... (Enterで実行)"
                       value={authorInput}
                       onChange={(e) => setAuthorInput(e.target.value)}
+                      onKeyDown={handleAuthorEnter}
                       className="pl-10"
                     />
                   </div>
