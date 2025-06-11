@@ -2,10 +2,11 @@
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Settings } from "lucide-react"
+import { Settings, Shield } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import type { Repository } from "@/lib/github-api"
 import { useApiKey } from "./api-key-provider"
+import { maskApiKey } from "@/lib/crypto-utils"
 import Link from "next/link"
 
 interface RepositoryHeaderProps {
@@ -13,7 +14,7 @@ interface RepositoryHeaderProps {
 }
 
 export function RepositoryHeader({ repository }: RepositoryHeaderProps) {
-  const { clearApiKey } = useApiKey()
+  const { clearApiKey, apiKey, isValidKey } = useApiKey()
 
   return (
     <div className="border-b bg-background">
@@ -33,22 +34,28 @@ export function RepositoryHeader({ repository }: RepositoryHeaderProps) {
               <span className="text-muted-foreground">/</span>
               <h1 className="text-xl font-bold">{repository.name}</h1>
               {repository.private && <Badge variant="secondary">プライベート</Badge>}
+              <a
+                href={repository.html_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-muted-foreground hover:underline"
+              >
+                GitHubで表示
+              </a>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <a
-              href={repository.html_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-muted-foreground hover:underline"
-            >
-              GitHubで表示
-            </a>
-            <ThemeToggle />
+            {isValidKey && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <Shield className="w-3 h-3 text-green-500" />
+                <span title={`APIキー: ${maskApiKey(apiKey || "")}`}>認証済み</span>
+              </div>
+            )}
             <Button variant="outline" size="sm" onClick={clearApiKey}>
               <Settings className="w-4 h-4 mr-2" />
-              API設定
+              API再設定
             </Button>
+            <ThemeToggle />
           </div>
         </div>
         {repository.description && <p className="text-muted-foreground mt-2">{repository.description}</p>}
