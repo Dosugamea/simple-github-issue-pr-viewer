@@ -274,7 +274,7 @@ export default function PullRequestsPage() {
               <CardContent className="space-y-4">
                 <div>
                   <Label htmlFor="pr-search" className="mb-1 block">
-                    キーワード検索
+                    キーワードで絞り込み
                   </Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -306,7 +306,7 @@ export default function PullRequestsPage() {
 
                 {availableLabels.length > 0 && (
                   <div>
-                    <Label className="mb-1 block">ラベル ({availableLabels.length}個)</Label>
+                    <Label className="mb-1 block">ラベルで絞り込み</Label>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
                       {availableLabels.map((label) => (
                         <div key={label.id} className="flex items-center">
