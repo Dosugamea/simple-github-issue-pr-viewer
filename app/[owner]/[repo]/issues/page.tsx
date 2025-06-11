@@ -254,7 +254,7 @@ export default function IssuesPage() {
   const hasActiveFilters = appliedSearch || appliedAuthor || appliedLabels.length > 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       <RepositoryHeader repository={repository} />
 
       <div className="container mx-auto p-6 max-w-6xl">
@@ -405,7 +405,7 @@ export default function IssuesPage() {
               </div>
             ) : (
               <>
-                <div className="space-y-1 border rounded-md overflow-hidden bg-white mb-4">
+                <div className="space-y-1 border rounded-md overflow-hidden bg-card mb-4">
                   {issues.length === 0 ? (
                     <div className="p-6 text-center text-muted-foreground">
                       {hasActiveFilters ? "検索条件に一致するIssueはありません" : "Issueはありません"}

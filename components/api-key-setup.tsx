@@ -40,7 +40,7 @@ export function ApiKeySetup() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-background">
       <Card className="max-w-md w-full mx-4">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

@@ -90,7 +90,7 @@ export default function PullRequestDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       <RepositoryHeader repository={repository} />
 
       <div className="container mx-auto p-6 max-w-4xl">
