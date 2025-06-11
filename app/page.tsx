@@ -66,7 +66,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <div className="border-b bg-background">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center justify-between">

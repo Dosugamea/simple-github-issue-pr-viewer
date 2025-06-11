@@ -289,7 +289,7 @@ export default function IssuesPage() {
   const hasActiveFilters = appliedSearch || appliedAuthor || appliedLabels.length > 0
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <RepositoryHeader repository={repository} />
 
       <div className="container mx-auto p-6 max-w-6xl">

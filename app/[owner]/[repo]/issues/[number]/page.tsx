@@ -89,7 +89,7 @@ export default function IssueDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="bg-background">
       <RepositoryHeader repository={repository} />
 
       <div className="container mx-auto p-6 max-w-4xl">
