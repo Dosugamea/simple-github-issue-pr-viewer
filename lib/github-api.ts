@@ -181,6 +181,9 @@ export class GitHubAPI {
         this.getIssueEvents(owner, repo, number),
       ])
 
+      // PRの場合、closedイベントをフィルタリング（マージ後の自動クローズを除外）
+      const filteredEvents = isPR ? events.filter((event) => event.event !== "closed") : events
+
       // タイムラインアイテムを作成
       const timeline: TimelineItem[] = [
         // Issue/PR自体を最初のアイテムとして追加
@@ -196,7 +199,7 @@ export class GitHubAPI {
           created_at: comment.created_at,
         })),
         // イベントをタイムラインアイテムに変換（nullチェックを追加）
-        ...events
+        ...filteredEvents
           .filter((event) => event && event.created_at) // nullや不正なイベントを除外
           .map((event) => ({
             type: "event" as const,
