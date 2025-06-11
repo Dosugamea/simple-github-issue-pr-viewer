@@ -1,17 +1,25 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Bug, Search } from "lucide-react"
+import { Bug, Search, User } from "lucide-react"
 import { useApiKey } from "@/components/api-key-provider"
 import { ApiKeySetup } from "@/components/api-key-setup"
 import { RepositoryHeader } from "@/components/repository-header"
-import { GitHubAPI, type Repository, type Issue, getContrastYIQ } from "@/lib/github-api"
+import { SimplePagination } from "@/components/simple-pagination"
+import {
+  GitHubAPI,
+  type Repository,
+  type Issue,
+  type Label as GitHubLabel,
+  type SimplePaginationInfo,
+  getContrastYIQ,
+} from "@/lib/github-api"
 import { useToast } from "@/hooks/use-toast"
 import Link from "next/link"
 import { RelativeTime } from "@/components/relative-time"
@@ -25,99 +33,217 @@ export default function IssuesPage() {
 
   const [repository, setRepository] = useState<Repository | null>(null)
   const [issues, setIssues] = useState<Issue[]>([])
+  const [pagination, setPagination] = useState<SimplePaginationInfo>({
+    hasNext: false,
+    hasPrev: false,
+    currentPage: 1,
+  })
   const [loading, setLoading] = useState(false)
-  const [search, setSearch] = useState("")
+
+  // 入力用の状態
+  const [searchInput, setSearchInput] = useState("")
+  const [authorInput, setAuthorInput] = useState("")
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
-  const [selectedAuthors, setSelectedAuthors] = useState<string[]>([])
   const [sortBy, setSortBy] = useState<"created" | "updated" | "comments">("created")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
 
-  const [availableLabels, setAvailableLabels] = useState<{ id: number; name: string; color: string }[]>([])
-  const [availableAuthors, setAvailableAuthors] = useState<{ login: string; avatar_url: string }[]>([])
+  // 適用済みの検索条件
+  const [appliedSearch, setAppliedSearch] = useState("")
+  const [appliedAuthor, setAppliedAuthor] = useState("")
+  const [appliedLabels, setAppliedLabels] = useState<string[]>([])
+  const [appliedSortBy, setAppliedSortBy] = useState<"created" | "updated" | "comments">("created")
+  const [appliedSortDirection, setAppliedSortDirection] = useState<"asc" | "desc">("desc")
+
+  const [availableLabels, setAvailableLabels] = useState<GitHubLabel[]>([])
 
   useEffect(() => {
     if (apiKey && owner && repo) {
-      fetchData()
+      fetchRepositoryAndLabels()
+      fetchIssues()
     }
   }, [apiKey, owner, repo])
 
-  const fetchData = async () => {
+  const fetchRepositoryAndLabels = async () => {
     if (!apiKey) return
 
-    setLoading(true)
     try {
       const api = new GitHubAPI(apiKey)
-      const [repoData, issuesData] = await Promise.all([api.getRepository(owner, repo), api.getIssues(owner, repo)])
+      const [repoData, labelsData] = await Promise.all([api.getRepository(owner, repo), api.getLabels(owner, repo)])
 
       setRepository(repoData)
-      setIssues(issuesData)
-
-      // ラベルと作成者を抽出
-      const labels = new Map()
-      const authors = new Map()
-
-      issuesData.forEach((issue) => {
-        issue.labels.forEach((label) => {
-          if (!labels.has(label.name)) {
-            labels.set(label.name, { id: label.id, name: label.name, color: label.color })
-          }
-        })
-
-        if (!authors.has(issue.user.login)) {
-          authors.set(issue.user.login, { login: issue.user.login, avatar_url: issue.user.avatar_url })
-        }
-      })
-
-      setAvailableLabels(Array.from(labels.values()))
-      setAvailableAuthors(Array.from(authors.values()))
+      setAvailableLabels(labelsData)
     } catch (error) {
       toast({
         title: "エラー",
         description: error instanceof Error ? error.message : "データの取得に失敗しました",
         variant: "destructive",
       })
-    } finally {
-      setLoading(false)
     }
   }
 
-  const filteredIssues = issues
-    .filter((issue) => {
-      const textMatch =
-        issue.title.toLowerCase().includes(search.toLowerCase()) ||
-        issue.body?.toLowerCase().includes(search.toLowerCase())
+  const buildSearchQuery = useCallback(() => {
+    let query = appliedSearch.trim()
 
-      const labelMatch =
-        selectedLabels.length === 0 || issue.labels.some((label) => selectedLabels.includes(label.name))
+    // ラベルフィルター
+    if (appliedLabels.length > 0) {
+      appliedLabels.forEach((label) => {
+        query += ` label:"${label}"`
+      })
+    }
 
-      const authorMatch = selectedAuthors.length === 0 || selectedAuthors.includes(issue.user.login)
+    // 作成者フィルター
+    if (appliedAuthor.trim()) {
+      query += ` author:${appliedAuthor.trim()}`
+    }
 
-      return textMatch && labelMatch && authorMatch
-    })
-    .sort((a, b) => {
-      let valueA, valueB
+    return query
+  }, [appliedSearch, appliedLabels, appliedAuthor])
 
-      if (sortBy === "created") {
-        valueA = new Date(a.created_at).getTime()
-        valueB = new Date(b.created_at).getTime()
-      } else if (sortBy === "updated") {
-        valueA = new Date(a.updated_at).getTime()
-        valueB = new Date(b.updated_at).getTime()
-      } else if (sortBy === "comments") {
-        valueA = a.comments
-        valueB = b.comments
-      } else {
-        return 0
+  const fetchIssues = useCallback(async () => {
+    if (!apiKey) return
+
+    setLoading(true)
+    try {
+      const api = new GitHubAPI(apiKey)
+      const query = buildSearchQuery()
+      const result = await api.searchIssues(owner, repo, query, 1, 30, appliedSortBy, appliedSortDirection)
+
+      setIssues(result.items)
+      setPagination(result.pagination)
+    } catch (error) {
+      toast({
+        title: "エラー",
+        description: error instanceof Error ? error.message : "Issueの取得に失敗しました",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [apiKey, owner, repo, buildSearchQuery, appliedSortBy, appliedSortDirection, toast])
+
+  const fetchByUrl = useCallback(
+    async (url: string) => {
+      if (!apiKey) return
+
+      setLoading(true)
+      try {
+        const api = new GitHubAPI(apiKey)
+        const result = await api.requestByUrl(url)
+
+        // 検索結果の形式に合わせる
+        setIssues(result.data.items || [])
+
+        if (result.pagination) {
+          // total_countがある場合は追加
+          if (result.data.total_count) {
+            result.pagination.totalCount = result.data.total_count
+            result.pagination.perPage = 30 // 現在の設定値と合わせる
+          }
+          setPagination(result.pagination)
+        }
+      } catch (error) {
+        toast({
+          title: "エラー",
+          description: error instanceof Error ? error.message : "データの取得に失敗しました",
+          variant: "destructive",
+        })
+      } finally {
+        setLoading(false)
       }
+    },
+    [apiKey, toast],
+  )
 
-      return sortDirection === "asc" ? valueA - valueB : valueB - valueA
+  const handleSearch = () => {
+    // 入力値を適用済み状態にコピー
+    setAppliedSearch(searchInput)
+    setAppliedAuthor(authorInput)
+    setAppliedLabels([...selectedLabels])
+    setAppliedSortBy(sortBy)
+    setAppliedSortDirection(sortDirection)
+
+    // 検索実行は次のuseEffectで行われる
+  }
+
+  // 適用済み条件が変更されたときに検索実行
+  useEffect(() => {
+    if (apiKey && owner && repo) {
+      fetchIssues()
+    }
+  }, [appliedSearch, appliedAuthor, appliedLabels, appliedSortBy, appliedSortDirection])
+
+  const handleUserClick = (username: string) => {
+    setAuthorInput(username)
+    setAppliedAuthor(username)
+    toast({
+      title: "フィルター適用",
+      description: `作成者「${username}」で絞り込みました`,
     })
+  }
+
+  const handleLabelClick = (labelName: string) => {
+    // 既に選択されているかチェック
+    if (appliedLabels.includes(labelName)) {
+      toast({
+        title: "既に適用済み",
+        description: `ラベル「${labelName}」は既に絞り込み条件に含まれています`,
+      })
+      return
+    }
+
+    // 入力フィールドの状態も更新
+    const newSelectedLabels = [...selectedLabels, labelName]
+    setSelectedLabels(newSelectedLabels)
+
+    // 適用済み状態も更新
+    const newAppliedLabels = [...appliedLabels, labelName]
+    setAppliedLabels(newAppliedLabels)
+
+    toast({
+      title: "フィルター追加",
+      description: `ラベル「${labelName}」で絞り込みました`,
+    })
+  }
+
+  const handleNextPage = () => {
+    if (pagination.nextUrl) {
+      fetchByUrl(pagination.nextUrl)
+    }
+  }
+
+  const handlePrevPage = () => {
+    if (pagination.prevUrl) {
+      fetchByUrl(pagination.prevUrl)
+    }
+  }
+
+  const clearSearch = () => {
+    setSearchInput("")
+    setAuthorInput("")
+    setSelectedLabels([])
+    setSortBy("created")
+    setSortDirection("desc")
+
+    setAppliedSearch("")
+    setAppliedAuthor("")
+    setAppliedLabels([])
+    setAppliedSortBy("created")
+    setAppliedSortDirection("desc")
+  }
+
+  const handleLabelChange = (labelName: string, checked: boolean) => {
+    if (checked) {
+      setSelectedLabels([...selectedLabels, labelName])
+    } else {
+      setSelectedLabels(selectedLabels.filter((l) => l !== labelName))
+    }
+  }
 
   if (!apiKey) {
     return <ApiKeySetup />
   }
 
-  if (loading && !repository) {
+  if (!repository) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p>読み込み中...</p>
@@ -125,13 +251,7 @@ export default function IssuesPage() {
     )
   }
 
-  if (!repository) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p>リポジトリが見つかりません</p>
-      </div>
-    )
-  }
+  const hasActiveFilters = appliedSearch || appliedAuthor || appliedLabels.length > 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -148,24 +268,39 @@ export default function IssuesPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          {/* サイドバー：フィルターとソート */}
           <div className="space-y-6">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-lg">フィルター</CardTitle>
+                <CardTitle className="text-lg">検索・ソート</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <Label htmlFor="issue-search" className="mb-1 block">
-                    キーワード検索
+                    キーワードで絞り込み
                   </Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="issue-search"
                       placeholder="タイトル、説明で検索..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="author-search" className="mb-1 block">
+                    作成者で絞り込み
+                  </Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="author-search"
+                      placeholder="ユーザー名を入力..."
+                      value={authorInput}
+                      onChange={(e) => setAuthorInput(e.target.value)}
                       className="pl-10"
                     />
                   </div>
@@ -173,62 +308,28 @@ export default function IssuesPage() {
 
                 {availableLabels.length > 0 && (
                   <div>
-                    <Label className="mb-1 block">ラベル</Label>
+                    <Label className="mb-1 block">ラベルで絞り込み</Label>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
                       {availableLabels.map((label) => (
                         <div key={label.id} className="flex items-center">
                           <input
                             type="checkbox"
-                            id={`label-${label.id}`}
+                            id={`issue-label-${label.id}`}
                             checked={selectedLabels.includes(label.name)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedLabels([...selectedLabels, label.name])
-                              } else {
-                                setSelectedLabels(selectedLabels.filter((l) => l !== label.name))
-                              }
-                            }}
+                            onChange={(e) => handleLabelChange(label.name, e.target.checked)}
                             className="mr-2"
                           />
-                          <label htmlFor={`label-${label.id}`} className="flex items-center cursor-pointer">
+                          <label
+                            htmlFor={`issue-label-${label.id}`}
+                            className="flex items-center cursor-pointer flex-1"
+                          >
                             <span
-                              className="w-3 h-3 rounded-full mr-1"
+                              className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
                               style={{ backgroundColor: `#${label.color}` }}
                             ></span>
-                            <span className="text-sm">{label.name}</span>
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {availableAuthors.length > 0 && (
-                  <div>
-                    <Label className="mb-1 block">作成者</Label>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {availableAuthors.map((author) => (
-                        <div key={author.login} className="flex items-center">
-                          <input
-                            type="checkbox"
-                            id={`author-${author.login}`}
-                            checked={selectedAuthors.includes(author.login)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedAuthors([...selectedAuthors, author.login])
-                              } else {
-                                setSelectedAuthors(selectedAuthors.filter((a) => a !== author.login))
-                              }
-                            }}
-                            className="mr-2"
-                          />
-                          <label htmlFor={`author-${author.login}`} className="flex items-center cursor-pointer">
-                            <img
-                              src={author.avatar_url || "/placeholder.svg"}
-                              alt={author.login}
-                              className="w-4 h-4 rounded-full mr-1"
-                            />
-                            <span className="text-sm">{author.login}</span>
+                            <span className="text-sm truncate" title={label.description || label.name}>
+                              {label.name}
+                            </span>
                           </label>
                         </div>
                       ))}
@@ -249,6 +350,7 @@ export default function IssuesPage() {
                       setSortDirection(newSortDirection)
                     }}
                     className="w-full p-2 border rounded-md"
+                    disabled={loading}
                   >
                     <option value="created-desc">作成日 (新しい順)</option>
                     <option value="created-asc">作成日 (古い順)</option>
@@ -259,91 +361,129 @@ export default function IssuesPage() {
                   </select>
                 </div>
 
-                {(selectedLabels.length > 0 || selectedAuthors.length > 0) && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setSelectedLabels([])
-                      setSelectedAuthors([])
-                    }}
-                    className="w-full"
-                  >
-                    フィルターをクリア
+                <div className="flex gap-2">
+                  <Button onClick={handleSearch} disabled={loading} className="flex-1">
+                    <Search className="w-4 h-4 mr-2" />
+                    検索
                   </Button>
-                )}
+                  {hasActiveFilters && (
+                    <Button variant="outline" onClick={clearSearch} disabled={loading}>
+                      クリア
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* メインコンテンツ：Issue一覧 */}
           <div className="md:col-span-3">
-            <div className="bg-muted p-2 rounded-md mb-4 flex justify-between items-center">
-              <div className="text-sm">{filteredIssues.length} 件のIssue</div>
-              <div className="text-sm">
-                {selectedLabels.length > 0 && (
-                  <span className="mr-2">{selectedLabels.length}個のラベルでフィルター中</span>
+            <div className="bg-muted p-2 rounded-md mb-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-medium">{hasActiveFilters ? "フィルター適用中" : "全てのIssue"}</div>
+                {appliedSearch && (
+                  <Badge variant="secondary" className="text-xs">
+                    キーワード: {appliedSearch}
+                  </Badge>
                 )}
-                {selectedAuthors.length > 0 && <span>{selectedAuthors.length}人の作成者でフィルター中</span>}
+                {appliedAuthor && (
+                  <Badge variant="secondary" className="text-xs">
+                    作成者: {appliedAuthor}
+                  </Badge>
+                )}
+                {appliedLabels.map((label) => (
+                  <Badge key={label} variant="secondary" className="text-xs">
+                    ラベル: {label}
+                  </Badge>
+                ))}
+                <div className="text-sm text-muted-foreground ml-auto">{loading ? "読み込み中..." : ""}</div>
               </div>
             </div>
 
-            <div className="space-y-1 border rounded-md overflow-hidden bg-white">
-              {filteredIssues.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground">条件に一致するIssueはありません</div>
-              ) : (
-                filteredIssues.map((issue) => (
-                  <Link
-                    key={issue.id}
-                    href={`/${owner}/${repo}/issues/${issue.number}`}
-                    className="block p-3 border-b last:border-b-0 hover:bg-muted/50"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-2">
-                        <div className="mt-1">
-                          {issue.state === "open" ? (
-                            <Bug className="w-5 h-5 text-green-500" />
-                          ) : (
-                            <Bug className="w-5 h-5 text-red-500" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="font-medium hover:text-primary">
-                            {issue.title}
-                            <span className="text-muted-foreground ml-1">#{issue.number}</span>
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            <span>
-                              {issue.user.login}が<RelativeTime dateString={issue.created_at} />
-                              に作成
-                            </span>
-                            {issue.comments > 0 && <span className="ml-2">コメント {issue.comments}件</span>}
-                          </div>
-                          {issue.labels.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {issue.labels.map((label) => (
-                                <Badge
-                                  key={label.id}
-                                  style={{
-                                    backgroundColor: `#${label.color}`,
-                                    color: getContrastYIQ(label.color),
-                                  }}
-                                  className="text-xs"
-                                >
-                                  {label.name}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground whitespace-nowrap">
-                        更新: <RelativeTime dateString={issue.updated_at} />
-                      </div>
+            {loading ? (
+              <div className="text-center py-8">
+                <p>読み込み中...</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1 border rounded-md overflow-hidden bg-white mb-4">
+                  {issues.length === 0 ? (
+                    <div className="p-6 text-center text-muted-foreground">
+                      {hasActiveFilters ? "検索条件に一致するIssueはありません" : "Issueはありません"}
                     </div>
-                  </Link>
-                ))
-              )}
-            </div>
+                  ) : (
+                    issues.map((issue) => (
+                      <div key={issue.id} className="p-3 border-b last:border-b-0 hover:bg-muted/50">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-2">
+                            <div className="mt-1">
+                              {issue.state === "open" ? (
+                                <Bug className="w-5 h-5 text-green-500" />
+                              ) : (
+                                <Bug className="w-5 h-5 text-red-500" />
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium hover:text-primary">
+                                <Link href={`/${owner}/${repo}/issues/${issue.number}`} className="hover:underline">
+                                  {issue.title}
+                                  <span className="text-muted-foreground ml-1">#{issue.number}</span>
+                                </Link>
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                <span>
+                                  <button
+                                    onClick={() => handleUserClick(issue.user.login)}
+                                    className="hover:underline hover:text-primary cursor-pointer font-medium"
+                                    title={`${issue.user.login}で絞り込み`}
+                                  >
+                                    {issue.user.login}
+                                  </button>
+                                  が<RelativeTime dateString={issue.created_at} />
+                                  に作成
+                                </span>
+                                {issue.comments > 0 && <span className="ml-2">コメント {issue.comments}件</span>}
+                              </div>
+                              {issue.labels.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {issue.labels.map((label) => (
+                                    <button
+                                      key={label.id}
+                                      onClick={() => handleLabelClick(label.name)}
+                                      className="hover:opacity-80 transition-opacity"
+                                      title={`「${label.name}」で絞り込み`}
+                                    >
+                                      <Badge
+                                        style={{
+                                          backgroundColor: `#${label.color}`,
+                                          color: getContrastYIQ(label.color),
+                                        }}
+                                        className="text-xs cursor-pointer"
+                                      >
+                                        {label.name}
+                                      </Badge>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">
+                            更新: <RelativeTime dateString={issue.updated_at} />
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <SimplePagination
+                  pagination={pagination}
+                  onPrevPage={handlePrevPage}
+                  onNextPage={handleNextPage}
+                  loading={loading}
+                />
+              </>
+            )}
           </div>
         </div>
       </div>

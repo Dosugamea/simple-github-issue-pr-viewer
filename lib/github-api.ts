@@ -54,24 +54,36 @@ export interface PullRequest {
   created_at: string
   updated_at: string
   html_url: string
-  head: {
+  head?: {
     ref: string
+    label?: string
+    sha?: string
   }
-  base: {
+  base?: {
     ref: string
+    label?: string
+    sha?: string
   }
-  labels: Array<{
+  labels?: Array<{
     id: number
     name: string
     color: string
     description?: string
   }>
   comments: number
-  assignees: Array<{
+  assignees?: Array<{
     login: string
     avatar_url: string
     html_url: string
   }>
+}
+
+export interface Label {
+  id: number
+  name: string
+  color: string
+  description?: string
+  default: boolean
 }
 
 export interface Comment {
@@ -115,6 +127,22 @@ export interface TimelineItem {
   created_at: string
 }
 
+export interface SearchResult<T> {
+  total_count: number
+  incomplete_results: boolean
+  items: T[]
+}
+
+export interface SimplePaginationInfo {
+  hasNext: boolean
+  hasPrev: boolean
+  currentPage: number
+  nextUrl?: string
+  prevUrl?: string
+  totalCount?: number
+  perPage?: number
+}
+
 export class GitHubAPI {
   private apiKey: string
 
@@ -122,7 +150,7 @@ export class GitHubAPI {
     this.apiKey = apiKey
   }
 
-  private async request(url: string) {
+  private async request(url: string): Promise<{ data: any; pagination?: SimplePaginationInfo }> {
     const response = await fetch(`https://api.github.com${url}`, {
       headers: {
         Authorization: `token ${this.apiKey}`,
@@ -134,73 +162,218 @@ export class GitHubAPI {
       throw new Error(`GitHub API Error: ${response.status} ${response.statusText}`)
     }
 
-    return response.json()
+    const data = await response.json()
+    const pagination = this.parseLinkHeader(response.headers.get("link"), url)
+
+    return { data, pagination }
+  }
+
+  private parseLinkHeader(linkHeader: string | null, currentUrl: string): SimplePaginationInfo {
+    const pagination: SimplePaginationInfo = {
+      hasNext: false,
+      hasPrev: false,
+      currentPage: 1,
+    }
+
+    if (!linkHeader) {
+      return pagination
+    }
+
+    // 現在のページ番号を取得
+    const currentPageMatch = currentUrl.match(/[?&]page=(\d+)/)
+    pagination.currentPage = currentPageMatch ? Number.parseInt(currentPageMatch[1]) : 1
+
+    // Linkヘッダーをパース
+    const links = linkHeader.split(",")
+    for (const link of links) {
+      const match = link.match(/<([^>]+)>;\s*rel="([^"]+)"/)
+      if (match) {
+        const [, url, rel] = match
+        const cleanUrl = url.replace("https://api.github.com", "")
+
+        switch (rel) {
+          case "next":
+            pagination.hasNext = true
+            pagination.nextUrl = cleanUrl
+            break
+          case "prev":
+            pagination.hasPrev = true
+            pagination.prevUrl = cleanUrl
+            break
+        }
+      }
+    }
+
+    return pagination
   }
 
   async getRepository(owner: string, repo: string): Promise<Repository> {
-    return this.request(`/repos/${owner}/${repo}`)
+    const result = await this.request(`/repos/${owner}/${repo}`)
+    return result.data
   }
 
-  async getIssues(owner: string, repo: string): Promise<Issue[]> {
-    const issues = await this.request(`/repos/${owner}/${repo}/issues?state=all&per_page=100`)
-    return issues.filter((issue: any) => !issue.pull_request)
+  async getLabels(owner: string, repo: string): Promise<Label[]> {
+    const result = await this.request(`/repos/${owner}/${repo}/labels?per_page=100`)
+    return result.data
+  }
+
+  async getIssues(
+    owner: string,
+    repo: string,
+    page = 1,
+    perPage = 30,
+  ): Promise<{ items: Issue[]; pagination: SimplePaginationInfo }> {
+    const result = await this.request(`/repos/${owner}/${repo}/issues?state=all&per_page=${perPage}&page=${page}`)
+    const issues = result.data.filter((issue: any) => !issue.pull_request)
+
+    return {
+      items: issues,
+      pagination: result.pagination || { hasNext: false, hasPrev: false, currentPage: page },
+    }
+  }
+
+  async getPullRequests(
+    owner: string,
+    repo: string,
+    page = 1,
+    perPage = 30,
+  ): Promise<{ items: PullRequest[]; pagination: SimplePaginationInfo }> {
+    const result = await this.request(`/repos/${owner}/${repo}/pulls?state=all&per_page=${perPage}&page=${page}`)
+
+    return {
+      items: result.data,
+      pagination: result.pagination || { hasNext: false, hasPrev: false, currentPage: page },
+    }
+  }
+
+  // searchIssuesメソッドを更新
+  async searchIssues(
+    owner: string,
+    repo: string,
+    query: string,
+    page = 1,
+    perPage = 30,
+    sort: "created" | "updated" | "comments" = "created",
+    order: "asc" | "desc" = "desc",
+  ): Promise<{ items: Issue[]; pagination: SimplePaginationInfo }> {
+    // クエリが空の場合でも、repo:owner/repo type:issueを使用
+    const baseQuery = `repo:${owner}/${repo} type:issue`
+    const searchQuery = query.trim() ? `${baseQuery} ${query}` : baseQuery
+    const url = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page}`
+
+    const result = await this.request(url)
+    const response: SearchResult<Issue> = result.data
+
+    // 検索APIの場合は総数がわかるので、より正確なページネーション情報を作成
+    const totalPages = Math.ceil(response.total_count / perPage)
+    const pagination: SimplePaginationInfo = {
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+      currentPage: page,
+      totalCount: response.total_count,
+      perPage: perPage,
+    }
+
+    if (pagination.hasNext) {
+      pagination.nextUrl = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page + 1}`
+    }
+    if (pagination.hasPrev) {
+      pagination.prevUrl = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page - 1}`
+    }
+
+    return { items: response.items, pagination }
+  }
+
+  // searchPullRequestsメソッドも同様に更新
+  async searchPullRequests(
+    owner: string,
+    repo: string,
+    query: string,
+    page = 1,
+    perPage = 30,
+    sort: "created" | "updated" | "comments" = "created",
+    order: "asc" | "desc" = "desc",
+  ): Promise<{ items: PullRequest[]; pagination: SimplePaginationInfo }> {
+    // クエリが空の場合でも、repo:owner/repo type:prを使用
+    const baseQuery = `repo:${owner}/${repo} type:pr`
+    const searchQuery = query.trim() ? `${baseQuery} ${query}` : baseQuery
+    const url = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page}`
+
+    const result = await this.request(url)
+    const response: SearchResult<PullRequest> = result.data
+
+    const totalPages = Math.ceil(response.total_count / perPage)
+    const pagination: SimplePaginationInfo = {
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+      currentPage: page,
+      totalCount: response.total_count,
+      perPage: perPage,
+    }
+
+    if (pagination.hasNext) {
+      pagination.nextUrl = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page + 1}`
+    }
+    if (pagination.hasPrev) {
+      pagination.prevUrl = `/search/issues?q=${encodeURIComponent(searchQuery)}&sort=${sort}&order=${order}&per_page=${perPage}&page=${page - 1}`
+    }
+
+    return { items: response.items, pagination }
+  }
+
+  // URLから直接データを取得するメソッド（ページネーション用）
+  async requestByUrl(url: string): Promise<{ data: any; pagination?: SimplePaginationInfo }> {
+    return this.request(url)
   }
 
   async getIssue(owner: string, repo: string, number: number): Promise<Issue> {
-    return this.request(`/repos/${owner}/${repo}/issues/${number}`)
-  }
-
-  async getPullRequests(owner: string, repo: string): Promise<PullRequest[]> {
-    return this.request(`/repos/${owner}/${repo}/pulls?state=all&per_page=100`)
+    const result = await this.request(`/repos/${owner}/${repo}/issues/${number}`)
+    return result.data
   }
 
   async getPullRequest(owner: string, repo: string, number: number): Promise<PullRequest> {
-    return this.request(`/repos/${owner}/${repo}/pulls/${number}`)
+    const result = await this.request(`/repos/${owner}/${repo}/pulls/${number}`)
+    return result.data
   }
 
   async getUserRepositories(): Promise<Repository[]> {
-    return this.request("/user/repos?per_page=100")
+    const result = await this.request("/user/repos?per_page=100")
+    return result.data
   }
 
-  // 新しく追加するメソッド
   async getIssueComments(owner: string, repo: string, number: number): Promise<Comment[]> {
-    return this.request(`/repos/${owner}/${repo}/issues/${number}/comments`)
+    const result = await this.request(`/repos/${owner}/${repo}/issues/${number}/comments`)
+    return result.data
   }
 
   async getIssueEvents(owner: string, repo: string, number: number): Promise<Event[]> {
-    return this.request(`/repos/${owner}/${repo}/issues/${number}/events`)
+    const result = await this.request(`/repos/${owner}/${repo}/issues/${number}/events`)
+    return result.data
   }
 
-  // Issue/PRのタイムラインを取得（コメントとイベントを時系列で結合）
   async getTimeline(owner: string, repo: string, number: number, isPR = false): Promise<TimelineItem[]> {
     try {
-      // Issue/PRの詳細、コメント、イベントを並行して取得
       const [item, comments, events] = await Promise.all([
         isPR ? this.getPullRequest(owner, repo, number) : this.getIssue(owner, repo, number),
         this.getIssueComments(owner, repo, number),
         this.getIssueEvents(owner, repo, number),
       ])
 
-      // PRの場合、closedイベントをフィルタリング（マージ後の自動クローズを除外）
       const filteredEvents = isPR ? events.filter((event) => event.event !== "closed") : events
 
-      // タイムラインアイテムを作成
       const timeline: TimelineItem[] = [
-        // Issue/PR自体を最初のアイテムとして追加
         {
           type: isPR ? "issue" : "issue",
           data: item,
           created_at: item.created_at,
         },
-        // コメントをタイムラインアイテムに変換
         ...comments.map((comment) => ({
           type: "comment" as const,
           data: comment,
           created_at: comment.created_at,
         })),
-        // イベントをタイムラインアイテムに変換（nullチェックを追加）
         ...filteredEvents
-          .filter((event) => event && event.created_at) // nullや不正なイベントを除外
+          .filter((event) => event && event.created_at)
           .map((event) => ({
             type: "event" as const,
             data: event,
@@ -208,11 +381,9 @@ export class GitHubAPI {
           })),
       ]
 
-      // 作成日時でソート
       return timeline.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     } catch (error) {
       console.error("Timeline取得エラー:", error)
-      // エラーが発生した場合は、最低限Issue/PRの情報だけ返す
       const item = isPR ? await this.getPullRequest(owner, repo, number) : await this.getIssue(owner, repo, number)
       return [
         {

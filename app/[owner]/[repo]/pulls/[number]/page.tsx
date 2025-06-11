@@ -198,17 +198,19 @@ export default function PullRequestDetailPage() {
               </div>
             )}
 
-            <div>
-              <h3 className="text-sm font-medium mb-2">ブランチ情報</h3>
-              <div className="text-sm border rounded-md p-2">
-                <div className="flex items-center gap-1">
-                  <GitBranch className="w-4 h-4" />
-                  <span className="font-mono">{pullRequest.head.ref}</span>
-                  <span className="mx-1">→</span>
-                  <span className="font-mono">{pullRequest.base.ref}</span>
+            {pullRequest.head?.ref && pullRequest.base?.ref && (
+              <div>
+                <h3 className="text-sm font-medium mb-2">ブランチ情報</h3>
+                <div className="text-sm border rounded-md p-2">
+                  <div className="flex items-center gap-1">
+                    <GitBranch className="w-4 h-4" />
+                    <span className="font-mono">{pullRequest.head.ref}</span>
+                    <span className="mx-1">→</span>
+                    <span className="font-mono">{pullRequest.base.ref}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             <div>
               <h3 className="text-sm font-medium mb-2">詳細情報</h3>
