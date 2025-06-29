@@ -6,7 +6,7 @@
 ねぇねぇ、せんぱい！GitHubのIssueとかプルリクって、たくさんあると見るの大変じゃない？💦
 このツールはね、そんなせんぱいのためにわたしが作った、指定したリポジトリのIssueとプルリクをシンプルにかわいく表示してくれる魔法のビューアなんだよっ！✨
 
-- [デモを触ってみる](https://simple-github-issue-pr-viewer.vercel.app/)
+- [デモを触ってみる](https://v0-git-hub-issue-viewer.vercel.app/)
 - [最新のデプロイを見る (要ログイン)](https://vercel.com/domaos-projects/v0-git-hub-issue-viewer)
 - [実装を続ける (要ログイン)](https://v0.dev/chat/projects/J71CqD2ZNLA)
 
